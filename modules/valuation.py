@@ -20,21 +20,23 @@ def calculate_valuation(
             "priority": 1,
         })
 
-    # Method 2: historical PE estimation
+    # Method 2: historical PE estimation (only if user manually provided pe_hist_avg)
     if eps_ttm and pe_hist_avg:
         pe_estimate = eps_ttm * pe_hist_avg
         estimates.append({
-            "method": f"歷史 PE 法（EPS {eps_ttm} × 均值 PE {pe_hist_avg}）",
+            "method": f"歷史 PE 法（EPS {round(eps_ttm,2)} × 均值 PE {pe_hist_avg}）",
             "value": round(pe_estimate, 2),
             "source": "system_estimate",
             "confidence": "low",
             "priority": 2,
+            "warning": "⚠️ 此為 PE 估算，對高成長科技股（如 MSFT、NVDA）嚴重低估，請以 Morningstar 手動輸入公允價值為準",
         })
 
     if not estimates:
         return {
             "status": "no_valuation",
-            "note": "請提供公允價值（fair_value）或 EPS + 歷史均值 PE",
+            "action_required": "🔴 必須由使用者手動提供公允價值才能估值",
+            "note": "請至 Morningstar / 分析師報告 查詢公允價值後，以 fair_value_manual 欄位輸入。禁止由 AI 自行猜測。",
         }
 
     # Use highest priority estimate as primary
