@@ -1,0 +1,346 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "美股分析引擎 ABCDE",
+    "description": "個人財務逆向工程 ABCDE 分析系統。A=水平配置, B=垂直配置, C=質化分析, D=量化分析+估值, E=選擇權試算。",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://YOUR_ZEABUR_DOMAIN",
+      "description": "Production server (replace with actual Zeabur URL)"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "healthCheck",
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "Server is running",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "properties": { "status": { "type": "string" }, "version": { "type": "string" } } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analyze": {
+      "post": {
+        "operationId": "fullAnalysis",
+        "summary": "完整 ABCDE 一次性分析（推薦入口）",
+        "description": "輸入股票代碼與可選參數，一次回傳完整 A~E 分析報告。未提供的欄位將標記為待確認。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["ticker"],
+                "properties": {
+                  "ticker": { "type": "string", "description": "美股代碼，例如 MSFT、AAPL、NVDA" },
+                  "total_investment": { "type": "number", "description": "A 水平配置：總可投資金額（美元）" },
+                  "user_age": { "type": "integer", "default": 35, "description": "用於計算積極/防禦/彩票比例" },
+                  "fair_value_manual": { "type": "number", "description": "D 估值：公允價值（Morningstar 或使用者估算，美元）" },
+                  "fair_value_source": { "type": "string", "default": "user_input", "description": "公允價值來源說明" },
+                  "pe_hist_avg": { "type": "number", "description": "D 估值：歷史均值 PE（從 Macrotrends 手動查詢）" },
+                  "industry_asset_turnover_avg": { "type": "number", "description": "D PEACE #15：同業資產週轉率均值（手動查詢 Gurufocus）" },
+                  "roic": { "type": "number", "description": "D PEACE #16：ROIC %（手動查詢 Gurufocus）" },
+                  "wacc": { "type": "number", "description": "D PEACE #16：WACC %（手動查詢 Gurufocus）" },
+                  "batch_count": { "type": "integer", "default": 5, "enum": [3, 4, 5], "description": "B 垂直配置批次數" },
+                  "safety_margin_steps": { "type": "array", "items": { "type": "number" }, "description": "B 垂直配置安全邊際列表，例如 [0,10,20,30,50]" },
+                  "moat_scores": {
+                    "type": "object",
+                    "description": "C 護城河評分：{'intangible_assets':'yes','cost_advantage':'no','network_effects':'partial','switching_costs':'yes','efficient_scale':'no'}",
+                    "properties": {
+                      "intangible_assets": { "type": "string", "enum": ["yes", "no", "partial", "unknown"] },
+                      "cost_advantage": { "type": "string", "enum": ["yes", "no", "partial", "unknown"] },
+                      "network_effects": { "type": "string", "enum": ["yes", "no", "partial", "unknown"] },
+                      "switching_costs": { "type": "string", "enum": ["yes", "no", "partial", "unknown"] },
+                      "efficient_scale": { "type": "string", "enum": ["yes", "no", "partial", "unknown"] }
+                    }
+                  },
+                  "risk_scores": {
+                    "type": "object",
+                    "description": "C RISK 評分：{'regulatory':'pass','inflation':'pass','technology':'fail','key_person':'pass'}",
+                    "properties": {
+                      "regulatory": { "type": "string", "enum": ["pass", "fail", "unknown"] },
+                      "inflation": { "type": "string", "enum": ["pass", "fail", "unknown"] },
+                      "technology": { "type": "string", "enum": ["pass", "fail", "unknown"] },
+                      "key_person": { "type": "string", "enum": ["pass", "fail", "unknown"] }
+                    }
+                  },
+                  "moat_evidences": {
+                    "type": "object",
+                    "description": "C 護城河佐證說明（可選），key 對應 moat_scores 的 key"
+                  },
+                  "risk_notes": {
+                    "type": "object",
+                    "description": "C RISK 備注（可選），key 對應 risk_scores 的 key"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "完整 ABCDE 報告",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          },
+          "404": { "description": "找不到該股票代碼（SEC EDGAR）" },
+          "502": { "description": "資料來源抓取失敗" }
+        }
+      }
+    },
+    "/peace": {
+      "post": {
+        "operationId": "calculatePeace",
+        "summary": "D — PEACE 16 項量化分析",
+        "description": "從 SEC EDGAR 抓取財報，計算 16 項 PEACE 指標。需手動提供 ROIC、WACC、同業資產週轉率。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["ticker"],
+                "properties": {
+                  "ticker": { "type": "string" },
+                  "industry_asset_turnover_avg": { "type": "number", "description": "同業資產週轉率均值" },
+                  "roic": { "type": "number", "description": "ROIC %（Gurufocus）" },
+                  "wacc": { "type": "number", "description": "WACC %（Gurufocus）" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "16 項 PEACE 指標結果", "content": { "application/json": { "schema": { "type": "object" } } } },
+          "404": { "description": "Ticker 不存在" },
+          "502": { "description": "資料抓取失敗" }
+        }
+      }
+    },
+    "/valuation": {
+      "post": {
+        "operationId": "calculateValuation",
+        "summary": "D — 估值與安全邊際計算",
+        "description": "計算安全邊際。公允價值可手動輸入（優先）或由歷史均值 PE × EPS 估算。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["ticker"],
+                "properties": {
+                  "ticker": { "type": "string" },
+                  "fair_value_manual": { "type": "number", "description": "公允價值（Morningstar 等）" },
+                  "fair_value_source": { "type": "string", "default": "user_input" },
+                  "eps_ttm": { "type": "number", "description": "EPS TTM（留空則從 Yahoo 抓）" },
+                  "pe_hist_avg": { "type": "number", "description": "歷史均值 PE（Macrotrends）" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "估值結果", "content": { "application/json": { "schema": { "type": "object" } } } },
+          "502": { "description": "無法取得市價" }
+        }
+      }
+    },
+    "/allocation/horizontal": {
+      "post": {
+        "operationId": "calculateHorizontal",
+        "summary": "A — 水平配置（積極/防禦/彩票/緊急）",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["total_investment"],
+                "properties": {
+                  "total_investment": { "type": "number", "description": "總可投資金額（美元）" },
+                  "user_age": { "type": "integer", "default": 35 },
+                  "manual_aggressive_pct": { "type": "number", "description": "手動覆蓋積極 %" },
+                  "manual_defensive_pct": { "type": "number", "description": "手動覆蓋防禦 %" },
+                  "manual_lottery_pct": { "type": "number", "description": "手動覆蓋彩票 %" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "水平配置結果", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/allocation/vertical": {
+      "post": {
+        "operationId": "calculateVertical",
+        "summary": "B — 垂直配置（分批買入計劃）",
+        "description": "根據公允價值與安全邊際分 3~5 批次，計算每批次目標買入價格與金額。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["per_stock_budget", "fair_value", "current_price"],
+                "properties": {
+                  "per_stock_budget": { "type": "number", "description": "每檔股票預算（美元）" },
+                  "fair_value": { "type": "number", "description": "公允價值（美元）" },
+                  "current_price": { "type": "number", "description": "當前市價（美元）" },
+                  "batch_count": { "type": "integer", "default": 5, "enum": [3, 4, 5] },
+                  "safety_margin_steps": { "type": "array", "items": { "type": "number" }, "description": "安全邊際步驟列表" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "垂直配置分批計劃", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/qualitative/template/{ticker}": {
+      "get": {
+        "operationId": "getQualitativeTemplate",
+        "summary": "C — 取得質化分析填表範本",
+        "description": "返回護城河 5 項 + RISK 4 項的空白評估表，供使用者填入評分。",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "美股代碼"
+          }
+        ],
+        "responses": {
+          "200": { "description": "空白評估範本", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/qualitative": {
+      "post": {
+        "operationId": "evaluateQualitative",
+        "summary": "C — 質化分析（護城河 + RISK）",
+        "description": "輸入護城河與 RISK 評分，返回質化分析結果。所有結論均為推估，需人工確認。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["ticker"],
+                "properties": {
+                  "ticker": { "type": "string" },
+                  "moat_scores": {
+                    "type": "object",
+                    "description": "護城河評分 yes/no/partial/unknown",
+                    "properties": {
+                      "intangible_assets": { "type": "string" },
+                      "cost_advantage": { "type": "string" },
+                      "network_effects": { "type": "string" },
+                      "switching_costs": { "type": "string" },
+                      "efficient_scale": { "type": "string" }
+                    }
+                  },
+                  "risk_scores": {
+                    "type": "object",
+                    "description": "RISK 評分 pass/fail/unknown",
+                    "properties": {
+                      "regulatory": { "type": "string" },
+                      "inflation": { "type": "string" },
+                      "technology": { "type": "string" },
+                      "key_person": { "type": "string" }
+                    }
+                  },
+                  "moat_evidences": { "type": "object", "description": "護城河佐證" },
+                  "risk_notes": { "type": "object", "description": "RISK 備注" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "質化分析結果", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/options/sell_put": {
+      "post": {
+        "operationId": "sellPut",
+        "summary": "E — Sell Put 試算",
+        "description": "計算 Sell Put 策略的保證金、年化報酬、損益平衡點。必須先完成 ABCD 分析（abcd_pass=true）。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["ticker", "strike_price", "premium_per_share", "expiry"],
+                "properties": {
+                  "ticker": { "type": "string" },
+                  "strike_price": { "type": "number", "description": "履約價（美元）" },
+                  "premium_per_share": { "type": "number", "description": "每股權利金（美元），使用者手動輸入" },
+                  "expiry": { "type": "string", "description": "到期日 YYYY-MM-DD" },
+                  "contracts": { "type": "integer", "default": 1, "description": "口數（1 口 = 100 股）" },
+                  "abcd_pass": { "type": "boolean", "default": false, "description": "ABCD 是否已全部通過" },
+                  "per_batch_budget": { "type": "number", "description": "每批次預算（B 垂直配置）" },
+                  "fair_value": { "type": "number", "description": "公允價值（用於垂直對齊檢查）" },
+                  "vertical_batches": {
+                    "type": "array",
+                    "items": { "type": "object" },
+                    "description": "B 垂直配置批次列表（來自 /allocation/vertical 結果）"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Sell Put 試算結果", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/options/sell_call": {
+      "post": {
+        "operationId": "sellCall",
+        "summary": "E — Sell Call 試算（需持有股票）",
+        "description": "計算 Sell Call 策略。強制檢查持股數 >= contracts×100，防止裸賣 Call。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["ticker", "strike_price", "premium_per_share", "expiry"],
+                "properties": {
+                  "ticker": { "type": "string" },
+                  "strike_price": { "type": "number" },
+                  "premium_per_share": { "type": "number" },
+                  "expiry": { "type": "string", "description": "YYYY-MM-DD" },
+                  "contracts": { "type": "integer", "default": 1 },
+                  "purchase_cost_per_share": { "type": "number", "description": "持股成本（用於計算年化報酬）" },
+                  "shares_held": { "type": "integer", "default": 0, "description": "目前持有股數（必須 >= contracts×100）" },
+                  "abcd_pass": { "type": "boolean", "default": false }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Sell Call 試算結果", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    }
+  }
+}
