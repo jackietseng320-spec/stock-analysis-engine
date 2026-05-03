@@ -7,8 +7,8 @@
   },
   "servers": [
     {
-      "url": "https://YOUR_ZEABUR_DOMAIN",
-      "description": "Production server (replace with actual Zeabur URL)"
+      "url": "https://api-production-f3d4.up.railway.app",
+      "description": "Railway production server"
     }
   ],
   "paths": {
