@@ -8,11 +8,18 @@ import yfinance as yf
 from functools import lru_cache
 from typing import Optional
 import re
+import asyncio
+import json
+import os
 
-SEC_HEADERS = {"User-Agent": "JackieAgent contact@jackietseng.com"}
+SEC_HEADERS = {
+    "User-Agent": "StockAnalysisEngine/1.0 jackietseng320@gmail.com",
+    "Accept-Encoding": "gzip, deflate",
+}
 SEC_BASE = "https://data.sec.gov"
-EDGAR_SEARCH = "https://efts.sec.gov/LATEST/search-index?q=%22{ticker}%22&dateRange=custom&startdt=2000-01-01&enddt=2030-01-01&forms=10-K"
 
+# 持久化 CIK 快取路徑
+_CIK_CACHE_FILE = "/tmp/sec_cik_cache.json"
 
 # ──────────────────────────────────────────────
 # CIK lookup
@@ -20,20 +27,55 @@ EDGAR_SEARCH = "https://efts.sec.gov/LATEST/search-index?q=%22{ticker}%22&dateRa
 
 _TICKER_CIK_CACHE: dict = {}
 
+def _load_cik_cache():
+    global _TICKER_CIK_CACHE
+    try:
+        if os.path.exists(_CIK_CACHE_FILE):
+            with open(_CIK_CACHE_FILE) as f:
+                _TICKER_CIK_CACHE.update(json.load(f))
+    except Exception:
+        pass
+
+def _save_cik_cache():
+    try:
+        with open(_CIK_CACHE_FILE, "w") as f:
+            json.dump(_TICKER_CIK_CACHE, f)
+    except Exception:
+        pass
+
+_load_cik_cache()
+
+async def _fetch_with_retry(client: httpx.AsyncClient, url: str, max_retries: int = 3) -> httpx.Response:
+    for attempt in range(max_retries):
+        try:
+            r = await client.get(url)
+            if r.status_code == 429:
+                wait = 2 ** attempt * 2
+                await asyncio.sleep(wait)
+                continue
+            r.raise_for_status()
+            return r
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429 and attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt * 2)
+                continue
+            raise
+    raise RuntimeError(f"SEC EDGAR rate limit exceeded after {max_retries} retries")
+
 async def get_cik(ticker: str) -> str:
     ticker = ticker.upper()
     if ticker in _TICKER_CIK_CACHE:
         return _TICKER_CIK_CACHE[ticker]
 
-    async with httpx.AsyncClient(headers=SEC_HEADERS, timeout=15) as client:
-        r = await client.get("https://www.sec.gov/files/company_tickers.json")
-        r.raise_for_status()
+    async with httpx.AsyncClient(headers=SEC_HEADERS, timeout=20) as client:
+        r = await _fetch_with_retry(client, "https://www.sec.gov/files/company_tickers.json")
         data = r.json()
 
     for _, entry in data.items():
         if entry["ticker"].upper() == ticker:
             cik = str(entry["cik_str"]).zfill(10)
             _TICKER_CIK_CACHE[ticker] = cik
+            _save_cik_cache()
             return cik
 
     raise ValueError(f"Ticker {ticker} not found in SEC EDGAR")
@@ -50,8 +92,7 @@ async def get_company_facts(cik: str) -> dict:
         return _FACTS_CACHE[cik]
 
     async with httpx.AsyncClient(headers=SEC_HEADERS, timeout=30) as client:
-        r = await client.get(f"{SEC_BASE}/api/xbrl/companyfacts/CIK{cik}.json")
-        r.raise_for_status()
+        r = await _fetch_with_retry(client, f"{SEC_BASE}/api/xbrl/companyfacts/CIK{cik}.json")
         data = r.json()
 
     _FACTS_CACHE[cik] = data
