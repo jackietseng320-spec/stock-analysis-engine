@@ -9,13 +9,17 @@ from pydantic import BaseModel, Field
 from typing import Optional
 import asyncio
 
-from modules.data_fetcher import fetch_financials, fetch_market_price, fetch_pe_history
+from modules.data_fetcher import fetch_financials, fetch_market_price, fetch_pe_history, fetch_yahoo_full
 from modules.peace_calc import calculate_peace
 from modules.valuation import calculate_valuation
 from modules.vertical import calculate_vertical, calculate_horizontal
 from modules.options_calc import sell_put, sell_call
 from modules.qualitative import evaluate_qualitative, get_qualitative_template
 from modules.report import generate_report
+from modules.auto_estimates import (
+    calculate_roic, estimate_wacc, estimate_pe_hist_avg,
+    estimate_industry_asset_turnover, estimate_fair_value,
+)
 
 app = FastAPI(
     title="美股分析引擎",
@@ -268,32 +272,48 @@ async def analyze_endpoint(req: FullAnalysisRequest):
     except Exception as e:
         raise HTTPException(502, f"SEC EDGAR 抓取失敗：{e}")
 
-    price_info = fetch_market_price(req.ticker)
-    current_price = price_info.get("current_price")
+    # ── 一次抓取所有 Yahoo 數據 ──────────────────────
+    yahoo = fetch_yahoo_full(req.ticker)
+    current_price = yahoo.get("current_price")
 
-    eps_ttm = None
-    if not req.fair_value_manual or req.pe_hist_avg:
-        pe_info = fetch_pe_history(req.ticker)
-        eps_ttm = pe_info.get("eps_ttm")
+    # ── 自動估算（優先用使用者覆蓋值）────────────────
+    roic_info = calculate_roic(financials)
+    wacc_info = estimate_wacc(yahoo, financials)
+    pe_info = estimate_pe_hist_avg(yahoo, financials, ticker=req.ticker)
+    turnover_info = estimate_industry_asset_turnover(yahoo)
+    fv_auto = estimate_fair_value(yahoo, pe_info)
 
-    # Run calculations
+    roic = req.roic if req.roic is not None else roic_info.get("roic_pct")
+    wacc = req.wacc if req.wacc is not None else wacc_info.get("wacc_pct")
+    industry_at = req.industry_asset_turnover_avg if req.industry_asset_turnover_avg is not None \
+                  else turnover_info.get("industry_asset_turnover_avg")
+    pe_hist_avg = req.pe_hist_avg if req.pe_hist_avg is not None else pe_info.get("pe_hist_avg")
+    eps_ttm = yahoo.get("eps_ttm")
+
+    # 公允價值：使用者手動輸入 > 自動分析師目標價 > PE 估算
+    fair_value_used = req.fair_value_manual or fv_auto.get("auto_fair_value")
+    fair_value_source = req.fair_value_source if req.fair_value_manual else fv_auto.get("primary_source", "auto")
+
+    # ── PEACE ────────────────────────────────────────
     peace = calculate_peace(
         financials,
-        industry_asset_turnover_avg=req.industry_asset_turnover_avg,
-        roic=req.roic,
-        wacc=req.wacc,
+        industry_asset_turnover_avg=industry_at,
+        roic=roic,
+        wacc=wacc,
     )
 
+    # ── Valuation ─────────────────────────────────────
     valuation = None
     if current_price:
         valuation = calculate_valuation(
             current_price=current_price,
-            fair_value_manual=req.fair_value_manual,
-            fair_value_source=req.fair_value_source,
+            fair_value_manual=fair_value_used,
+            fair_value_source=fair_value_source,
             eps_ttm=eps_ttm,
-            pe_hist_avg=req.pe_hist_avg,
+            pe_hist_avg=pe_hist_avg,
         )
 
+    # ── A + B Allocation ──────────────────────────────
     horizontal = None
     vertical = None
     if req.total_investment:
@@ -301,16 +321,17 @@ async def analyze_endpoint(req: FullAnalysisRequest):
             total_investment=req.total_investment,
             user_age=req.user_age,
         )
-        if valuation and req.fair_value_manual:
+        if fair_value_used:
             per_stock = horizontal.get("per_stock_budget", 0)
             vertical = calculate_vertical(
                 per_stock_budget=per_stock,
-                fair_value=req.fair_value_manual,
+                fair_value=fair_value_used,
                 current_price=current_price or 0,
                 batch_count=req.batch_count,
                 safety_margin_steps=req.safety_margin_steps,
             )
 
+    # ── C Qualitative ─────────────────────────────────
     qualitative = None
     if req.moat_scores or req.risk_scores:
         qualitative = evaluate_qualitative(
@@ -327,7 +348,23 @@ async def analyze_endpoint(req: FullAnalysisRequest):
         qualitative=qualitative,
         peace=peace,
         valuation=valuation,
-        market_price_info=price_info,
+        market_price_info=yahoo,
     )
+
+    # ── 附加自動估算明細 ──────────────────────────────
+    report["auto_estimates"] = {
+        "fair_value": fv_auto,
+        "roic": roic_info,
+        "wacc": wacc_info,
+        "pe_hist_avg": pe_info,
+        "industry_asset_turnover": turnover_info,
+        "data_sources": {
+            "financials": "SEC EDGAR（美國官方政府財報數據庫）",
+            "market_price": "Yahoo Finance（華爾街分析師共識，同 Bloomberg）",
+            "analyst_targets": f"Yahoo Finance 分析師共識（{yahoo.get('analyst_count', 'N/A')} 位）",
+            "sector_benchmarks": "Damodaran NYU（全球投行引用行業均值標準）",
+            "wacc_methodology": "CAPM 標準公式（CFA 教科書方法論）",
+        },
+    }
 
     return report

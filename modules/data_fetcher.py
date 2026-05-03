@@ -285,21 +285,53 @@ def fetch_market_price(ticker: str) -> dict:
         }
 
 
-def fetch_pe_history(ticker: str) -> dict:
-    """Return trailing PE as proxy for current PE; historical avg requires external source."""
+def fetch_yahoo_full(ticker: str) -> dict:
+    """Fetch all useful Yahoo Finance data in one call: price, EPS, PE, analyst targets, beta, sector."""
     try:
         t = yf.Ticker(ticker)
         info = t.info
-        trailing_pe = info.get("trailingPE")
-        forward_pe = info.get("forwardPE")
-        eps_ttm = info.get("trailingEps")
+        fast = t.fast_info
+
+        price = getattr(fast, "last_price", None) or getattr(fast, "regularMarketPrice", None)
+        if price is None:
+            hist = t.history(period="1d")
+            price = float(hist["Close"].iloc[-1]) if not hist.empty else None
+
         return {
-            "trailing_pe": trailing_pe,
-            "forward_pe": forward_pe,
-            "eps_ttm": eps_ttm,
+            "current_price": price,
+            "eps_ttm": info.get("trailingEps"),
+            "trailing_pe": info.get("trailingPE"),
+            "forward_pe": info.get("forwardPE"),
+            "beta": info.get("beta"),
+            "sector": info.get("sector", ""),
+            "industry": info.get("industry", ""),
+            # Analyst consensus targets
+            "analyst_target_mean": info.get("targetMeanPrice"),
+            "analyst_target_low": info.get("targetLowPrice"),
+            "analyst_target_high": info.get("targetHighPrice"),
+            "analyst_count": info.get("numberOfAnalystOpinions"),
+            "recommendation": info.get("recommendationKey"),
+            # Capital structure helpers
+            "market_cap": info.get("marketCap"),
+            "enterprise_value": info.get("enterpriseValue"),
+            "total_debt": info.get("totalDebt"),
+            "interest_expense": info.get("interestExpense"),
+            "tax_rate": info.get("effectiveTaxRate"),
             "source": "yahoo_finance",
-            "note": "歷史均值 PE 需使用者手動從 Macrotrends 查詢",
+            "delay_note": "可能 15–20 分鐘延遲",
             "confidence": "medium",
         }
     except Exception as e:
-        return {"error": str(e), "source": "yahoo_finance"}
+        return {"error": str(e), "source": "yahoo_finance", "confidence": "unknown"}
+
+
+def fetch_pe_history(ticker: str) -> dict:
+    """Backward-compat wrapper."""
+    data = fetch_yahoo_full(ticker)
+    return {
+        "trailing_pe": data.get("trailing_pe"),
+        "forward_pe": data.get("forward_pe"),
+        "eps_ttm": data.get("eps_ttm"),
+        "source": "yahoo_finance",
+        "confidence": "medium",
+    }
