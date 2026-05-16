@@ -1,5 +1,15 @@
 """M10 AutoEstimates — 自動計算 ROIC、WACC、歷史均值 PE、同業資產週轉率"""
 
+# Morningstar 公允價值查找表（手動維護，最高優先級）
+# 格式：ticker -> {"value": float, "date": "YYYY-MM-DD", "article": "..."}
+MORNINGSTAR_FAIR_VALUES: dict[str, dict] = {
+    "MSFT": {"value": 600.0, "date": "2026-03-01", "note": "Wide-moat; multiple 2026 articles maintain $600"},
+    "NVDA": {"value": 260.0, "date": "2026-03-17", "note": "Raising FVE on agentic AI / $1T GTC forecast"},
+    "META": {"value": 850.0, "date": "2026-04-29", "note": "Ad sales growth accelerates even as AI costs mount"},
+    "TSM":  {"value": 428.0, "date": "2026-04-16", "note": "TWD 2,700 / USD 428; refining guidance amid strong AI demand"},
+    "2330": {"value": 428.0, "date": "2026-04-16", "note": "Same as TSM ADR"},
+}
+
 # 行業資產週轉率參考值（來源：Damodaran 行業平均）
 SECTOR_ASSET_TURNOVER = {
     "Technology": 0.60,
@@ -208,13 +218,27 @@ def estimate_industry_asset_turnover(yahoo_data: dict) -> dict:
     }
 
 
-def estimate_fair_value(yahoo_data: dict, pe_hist_info: dict) -> dict:
+def estimate_fair_value(yahoo_data: dict, pe_hist_info: dict, ticker: str = "") -> dict:
     """
-    公允價值自動估算（多種方法）：
-    1. 分析師目標價均值（最優先）
+    公允價值自動估算（優先順序）：
+    0. Morningstar 公允價值查找表（最高優先）
+    1. 分析師共識目標價（Yahoo）
     2. 歷史均值 PE × EPS TTM
     """
     estimates = []
+    ticker_upper = (ticker or yahoo_data.get("ticker", "")).upper()
+
+    # Method 0: Morningstar 查找表（最高優先）
+    ms = MORNINGSTAR_FAIR_VALUES.get(ticker_upper)
+    if ms:
+        estimates.append({
+            "method": f"Morningstar 公允價值（{ms['date']}）",
+            "value": ms["value"],
+            "source": "morningstar",
+            "confidence": "high",
+            "priority": 0,
+            "note": ms.get("note", ""),
+        })
 
     # Method 1: 分析師共識目標價
     analyst_mean = yahoo_data.get("analyst_target_mean")

@@ -281,7 +281,7 @@ async def analyze_endpoint(req: FullAnalysisRequest):
     wacc_info = estimate_wacc(yahoo, financials)
     pe_info = estimate_pe_hist_avg(yahoo, financials, ticker=req.ticker)
     turnover_info = estimate_industry_asset_turnover(yahoo)
-    fv_auto = estimate_fair_value(yahoo, pe_info)
+    fv_auto = estimate_fair_value(yahoo, pe_info, ticker=req.ticker)
 
     roic = req.roic if req.roic is not None else roic_info.get("roic_pct")
     wacc = req.wacc if req.wacc is not None else wacc_info.get("wacc_pct")
@@ -361,6 +361,7 @@ async def analyze_endpoint(req: FullAnalysisRequest):
         "data_sources": {
             "financials": "SEC EDGAR（美國官方政府財報數據庫）",
             "market_price": "Yahoo Finance（華爾街分析師共識，同 Bloomberg）",
+            "fair_value": "Morningstar 公允價值（優先）／Yahoo Finance 分析師共識（備用）",
             "analyst_targets": f"Yahoo Finance 分析師共識（{yahoo.get('analyst_count', 'N/A')} 位）",
             "sector_benchmarks": "Damodaran NYU（全球投行引用行業均值標準）",
             "wacc_methodology": "CAPM 標準公式（CFA 教科書方法論）",
