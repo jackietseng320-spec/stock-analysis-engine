@@ -9,7 +9,7 @@ def calculate_vertical(
     safety_margin_steps: list[float] | None = None,
 ) -> dict:
     if safety_margin_steps is None:
-        safety_margin_steps = [0, 10, 20, 30, 50] if batch_count == 5 else [0, 15, 35]
+        safety_margin_steps = [10, 20, 25, 30, 40] if batch_count == 5 else [10, 20, 35]
 
     if len(safety_margin_steps) != batch_count:
         safety_margin_steps = safety_margin_steps[:batch_count]
