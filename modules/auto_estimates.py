@@ -279,6 +279,7 @@ def estimate_fair_value(yahoo_data: dict, pe_hist_info: dict, ticker: str = "") 
         "primary_method": primary["method"],
         "primary_source": primary["source"],
         "primary_confidence": primary["confidence"],
+        "primary_source_url": primary.get("source_url", ""),
         "estimates": estimates,
         "recommendation": primary.get("range"),
     }
